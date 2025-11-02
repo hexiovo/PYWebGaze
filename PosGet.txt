@@ -1,0 +1,109 @@
+(function(){
+  // 询问用户要绘制多少个矩形
+  let totalRectangles = parseInt(prompt("请输入要绘制的矩形数量:", "3"));
+  if(isNaN(totalRectangles) || totalRectangles <= 0){
+    alert("输入无效，默认绘制 3 个矩形");
+    totalRectangles = 3;
+  }
+
+  // 创建画布覆盖全页面
+  const canvas = document.createElement('canvas');
+  canvas.id = 'drawCanvas';
+  canvas.style.position = 'fixed';
+  canvas.style.top = '0';
+  canvas.style.left = '0';
+  canvas.style.width = '100%';
+  canvas.style.height = '100%';
+  canvas.style.zIndex = '999999';
+  canvas.style.cursor = 'crosshair';
+  canvas.width = window.innerWidth;
+  canvas.height = window.innerHeight;
+  document.body.appendChild(canvas);
+  const ctx = canvas.getContext('2d');
+
+  let startX, startY, isDrawing=false;
+  let rectangles = [];
+
+  // 浮动信息框
+  const infoDiv = document.createElement('div');
+  infoDiv.style.position = 'fixed';
+  infoDiv.style.top = '10px';
+  infoDiv.style.left = '10px';
+  infoDiv.style.background = 'rgba(255,255,255,0.9)';
+  infoDiv.style.padding = '10px';
+  infoDiv.style.border = '1px solid #ccc';
+  infoDiv.style.fontFamily = 'monospace';
+  infoDiv.style.zIndex = '1000000';
+  infoDiv.innerHTML = `拖拽鼠标绘制矩形（共${totalRectangles}个）`;
+  document.body.appendChild(infoDiv);
+
+  canvas.addEventListener('mousedown', e=>{
+    startX=e.clientX; startY=e.clientY; isDrawing=true;
+  });
+
+  canvas.addEventListener('mousemove', e=>{
+    if(!isDrawing) return;
+    const x=e.clientX, y=e.clientY;
+    ctx.clearRect(0,0,canvas.width,canvas.height);
+    drawAll();
+    ctx.strokeStyle='red';
+    ctx.lineWidth=2;
+    ctx.strokeRect(startX,startY,x-startX,y-startY);
+  });
+
+  canvas.addEventListener('mouseup', e=>{
+    if(!isDrawing) return;
+    isDrawing=false;
+    const endX=e.clientX, endY=e.clientY;
+    const rect = {
+      leftTop: {x: startX, y: startY},
+      rightTop: {x: endX, y: startY},
+      leftBottom: {x: startX, y: endY},
+      rightBottom: {x: endX, y: endY}
+    };
+    rectangles.push(rect);
+    drawAll();
+    infoDiv.innerHTML = `已绘制矩形: ${rectangles.length} / ${totalRectangles}`;
+    console.log(`矩形${rectangles.length}:`, rect);
+
+    // 如果已经绘制指定数量矩形，导出 CSV
+    if(rectangles.length === totalRectangles){
+      exportCSV(rectangles);
+      cleanup();
+    }
+  });
+
+  function drawAll(){
+    rectangles.forEach((r,i)=>{
+      ctx.strokeStyle='blue';
+      ctx.lineWidth=2;
+      ctx.strokeRect(r.leftTop.x,r.leftTop.y,r.rightBottom.x-r.leftTop.x,r.rightBottom.y-r.leftTop.y);
+    });
+  }
+
+  function exportCSV(rects){
+    let csvContent = "data:text/csv;charset=utf-8,矩形编号,左上X,左上Y,右上X,右上Y,左下X,左下Y,右下X,右下Y\n";
+    rects.forEach((r,i)=>{
+      csvContent += `${i+1},${r.leftTop.x},${r.leftTop.y},${r.rightTop.x},${r.rightTop.y},${r.leftBottom.x},${r.leftBottom.y},${r.rightBottom.x},${r.rightBottom.y}\n`;
+    });
+    const link = document.createElement("a");
+    link.setAttribute("href", encodeURI(csvContent));
+    link.setAttribute("download", "weicsv.csv");
+    document.body.appendChild(link);
+    link.click();
+    document.body.removeChild(link);
+    alert("已导出 CSV 文件 weicsv.csv");
+  }
+
+  function cleanup(){
+    canvas.remove();
+    infoDiv.remove();
+    console.log('绘制完成，矩形数据:', rectangles);
+  }
+
+  window.addEventListener('resize', ()=>{
+    canvas.width=window.innerWidth;
+    canvas.height=window.innerHeight;
+    drawAll();
+  });
+})();

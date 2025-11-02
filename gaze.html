@@ -1,0 +1,284 @@
+<!DOCTYPE html>
+<html lang="zh">
+<head>
+  <meta charset="UTF-8" />
+  <title>WebGazer 九点校准与验证实验</title>
+  <script src="https://webgazer.cs.brown.edu/webgazer.js"></script>
+  <style>
+    body {
+      text-align: center;
+      background: #f8f8f8;
+      font-family: Arial, sans-serif;
+      margin: 0;
+      overflow: hidden;
+    }
+    .dot {
+      width: 24px;
+      height: 24px;
+      background: red;
+      border-radius: 50%;
+      position: fixed;
+      display: none;
+      cursor: pointer;
+      z-index: 9999;
+      box-shadow: 0 0 10px rgba(255,0,0,0.5);
+    }
+    #instructions {
+      margin-top: 30px;
+      font-size: 18px;
+      z-index: 9999;
+      position: relative;
+    }
+    button {
+      display: none;
+      margin-top: 30px;
+      padding: 10px 20px;
+      border: none;
+      border-radius: 6px;
+      cursor: pointer;
+      font-size: 16px;
+      position: relative;
+      z-index: 9999;
+    }
+    #exportBtn { background: #4CAF50; color:white; }
+    #recalibrateBtn { background: #f44336; margin-left:10px; color:white; }
+    #validateBtn { background: #2196F3; margin-left:10px; color:white; }
+  </style>
+</head>
+<body>
+  <h1>WebGazer 九点校准与验证实验</h1>
+  <p id="instructions">
+    请允许摄像头访问。<br>
+    校准时，请注视屏幕上出现的红点，并在注视红点中央时点击它。
+  </p>
+
+  <button id="exportBtn">导出数据 (CSV)</button>
+  <button id="recalibrateBtn">重新校准</button>
+  <button id="validateBtn">开始验证</button>
+
+  <script>
+    // ===== 全局变量 =====
+    let gazeData = [];
+    let calibrationCount = 0;
+    let tracking = false;
+    const dots = [];
+    const calibrationErrors = [];
+    const validationData = [];
+    const validationErrors = [];
+
+    const calibrationPositions = [
+      [0.1,0.1],[0.5,0.1],[0.9,0.1],
+      [0.1,0.5],[0.5,0.5],[0.9,0.5],
+      [0.1,0.9],[0.5,0.9],[0.9,0.9]
+    ];
+
+    const validationPositions = [
+      [0.1, 0.1],[0.9,0.1],[0.1,0.9],[0.9,0.9],[0.5,0.5]
+    ];
+
+    // ===== 创建九个校准点 =====
+    function createDots() {
+      calibrationPositions.forEach((pos,i)=>{
+        const dot = document.createElement('div');
+        dot.classList.add('dot');
+        dot.style.left = `${pos[0]*window.innerWidth-12}px`;
+        dot.style.top = `${pos[1]*window.innerHeight-12}px`;
+
+        dot.onclick = async ()=>{
+          const prediction = await webgazer.getCurrentPrediction();
+          if(!prediction){
+            alert("请注视红点中央后再点击！");
+            return;
+          }
+          const dx = prediction.x - pos[0]*window.innerWidth;
+          const dy = prediction.y - pos[1]*window.innerHeight;
+          const distance = Math.sqrt(dx*dx + dy*dy);
+
+          if(distance<200){
+            calibrationErrors.push(distance);
+            calibrationCount++;
+            dot.style.display='none';
+            if(calibrationCount<dots.length){
+              dots[calibrationCount].style.display='block';
+            } else {
+              showCalibrationResult();
+              startTracking();
+            }
+          } else {
+            alert("请注视红点中央后再点击！");
+          }
+        };
+
+        document.body.appendChild(dot);
+        dots.push(dot);
+      });
+    }
+
+    createDots();
+
+    // ===== 初始化 WebGazer =====
+    window.onload = async () => {
+      await webgazer.setRegression('ridge')
+        .setGazeListener((data, timestamp)=>{
+          if(data && tracking){
+            const now = new Date();
+            const bjTime = new Date(now.getTime()+8*60*60*1000)
+              .toISOString().replace('T',' ').replace('Z','');
+            gazeData.push({
+              time_local: bjTime,
+              x:data.x,
+              y:data.y
+            });
+          }
+        })
+        .begin();
+
+      setTimeout(()=>{
+        const video = document.getElementById('webgazerVideoFeed');
+        const overlay = document.getElementById('webgazerVideoOverlay');
+        if(video) video.style.zIndex=1;
+        if(overlay) overlay.style.zIndex=2;
+      },1500);
+
+      dots[0].style.display='block';
+    };
+
+    // ===== 校准结果显示 =====
+    function showCalibrationResult(){
+      const sum = calibrationErrors.reduce((a,b)=>a+b,0);
+      const avg = (sum/calibrationErrors.length).toFixed(2);
+      document.getElementById('instructions').innerHTML=
+        `✅ 校准完成！<br>`+
+        `每个点误差(px)：${calibrationErrors.map(d=>d.toFixed(2)).join(', ')}<br>`+
+        `平均校准误差：${avg} px<br>`+
+        `请保持自然注视屏幕，系统正在记录您的注视点...`;
+    }
+
+    // ===== 开始注视追踪 =====
+    function startTracking(){
+      tracking = true;
+      setTimeout(()=>{
+        document.getElementById('exportBtn').style.display='inline-block';
+        document.getElementById('recalibrateBtn').style.display='inline-block';
+        document.getElementById('validateBtn').style.display='inline-block';
+      },5000);
+    }
+
+    // ===== 验证逻辑 =====
+    const validateDot = document.createElement('div');
+    validateDot.classList.add('dot');
+    document.body.appendChild(validateDot);
+
+    function startValidation(){
+      let index=0;
+
+      function showNextDot(){
+        if(index>=validationPositions.length){
+          showValidationResult();
+          return;
+        }
+
+        const pos = validationPositions[index];
+        validateDot.style.left = `${pos[0]*window.innerWidth-12}px`;
+        validateDot.style.top = `${pos[1]*window.innerHeight-12}px`;
+        validateDot.style.display='block';
+
+        setTimeout(()=>{
+          let t=0;
+          const interval = setInterval(async ()=>{
+            t+=100;
+            const pred = await webgazer.getCurrentPrediction();
+            if(pred){
+              validationData.push({
+                point:index+1,
+                x_real: pos[0]*window.innerWidth,
+                y_real: pos[1]*window.innerHeight,
+                x_pred: pred.x,
+                y_pred: pred.y,
+                time: new Date().toISOString()
+              });
+            }
+            if(t>=3000){
+              clearInterval(interval);
+              index++;
+              validateDot.style.display='none';
+              showNextDot();
+            }
+          },100);
+        },1000);
+      }
+
+      showNextDot();
+    }
+
+    function showValidationResult(){
+      validationErrors.length=0;
+      validationPositions.forEach((pos,i)=>{
+        const points = validationData.filter(d=>d.point===i+1);
+        if(points.length>0){
+          const avgX = points.reduce((a,b)=>a+b.x_pred,0)/points.length;
+          const avgY = points.reduce((a,b)=>a+b.y_pred,0)/points.length;
+          const dx = avgX - pos[0]*window.innerWidth;
+          const dy = avgY - pos[1]*window.innerHeight;
+          const dist = Math.sqrt(dx*dx+dy*dy);
+          validationErrors.push(dist);
+        } else validationErrors.push(NaN);
+      });
+      const avg = (validationErrors.reduce((a,b)=>a+b,0)/validationErrors.length).toFixed(2);
+      document.getElementById('instructions').innerHTML=
+        `✅ 验证完成！<br>`+
+        `每个点误差(px)：${validationErrors.map(d=>d.toFixed(2)).join(', ')}<br>`+
+        `平均验证误差：${avg} px`;
+    }
+
+    document.getElementById('validateBtn').onclick = ()=>startValidation();
+
+    // ===== 导出 CSV =====
+    document.getElementById('exportBtn').onclick = ()=>{
+      let csvContent = "data:text/csv;charset=utf-8,";
+      // 注视轨迹
+      csvContent+="time_local(北京时间),x,y\n";
+      csvContent+=gazeData.map(d=>`${d.time_local},${d.x.toFixed(2)},${d.y.toFixed(2)}`).join("\n");
+      csvContent+="\n\n";
+
+      // 校准误差
+      csvContent+="点编号,误差(px)\n";
+      calibrationErrors.forEach((err,i)=>csvContent+=`${i+1},${err.toFixed(2)}\n`);
+      const avgCal = (calibrationErrors.reduce((a,b)=>a+b,0)/calibrationErrors.length).toFixed(2);
+      csvContent+=`平均校准误差,${avgCal}\n\n`;
+
+      // 验证误差
+      csvContent+="验证点编号,误差(px)\n";
+      validationErrors.forEach((err,i)=>csvContent+=`${i+1},${err.toFixed(2)}\n`);
+      const avgVal = (validationErrors.reduce((a,b)=>a+b,0)/validationErrors.length).toFixed(2);
+      csvContent+=`平均验证误差,${avgVal}\n`;
+
+      const link = document.createElement("a");
+      link.setAttribute("href", encodeURI(csvContent));
+      link.setAttribute("download","gaze_data_full.csv");
+      document.body.appendChild(link);
+      link.click();
+      document.body.removeChild(link);
+    };
+
+    // ===== 重新校准 =====
+    document.getElementById('recalibrateBtn').onclick = ()=>{
+      tracking=false;
+      gazeData=[];
+      calibrationCount=0;
+      calibrationErrors.length=0;
+      validationData.length=0;
+      validationErrors.length=0;
+      dots.forEach(dot=>dot.remove());
+      dots.length=0;
+      createDots();
+      document.getElementById('instructions').innerHTML=
+        "🔁 重新校准：请注视屏幕上出现的红点，并在注视红点中央时点击它。";
+      document.getElementById('exportBtn').style.display='none';
+      document.getElementById('recalibrateBtn').style.display='none';
+      document.getElementById('validateBtn').style.display='none';
+      dots[0].style.display='block';
+    };
+  </script>
+</body>
+</html>
