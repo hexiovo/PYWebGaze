@@ -65,6 +65,7 @@
     const calibrationErrors = [];
     const validationData = [];
     const validationErrors = [];
+    const TOLERANCE = 150; // 容差改为150px
 
     const calibrationPositions = [
       [0.1,0.1],[0.5,0.1],[0.9,0.1],
@@ -85,6 +86,8 @@
         dot.style.top = `${pos[1]*window.innerHeight-12}px`;
 
         dot.onclick = async ()=>{
+          // 等待300ms，确保预测是最新的
+          await new Promise(r=>setTimeout(r,300));
           const prediction = await webgazer.getCurrentPrediction();
           if(!prediction){
             alert("请注视红点中央后再点击！");
@@ -94,7 +97,7 @@
           const dy = prediction.y - pos[1]*window.innerHeight;
           const distance = Math.sqrt(dx*dx + dy*dy);
 
-          if(distance<200){
+          if(distance < TOLERANCE){
             calibrationErrors.push(distance);
             calibrationCount++;
             dot.style.display='none';
@@ -122,8 +125,7 @@
         .setGazeListener((data, timestamp)=>{
           if(data && tracking){
             const now = new Date();
-            const bjTime = new Date(now.getTime()+8*60*60*1000)
-              .toISOString().replace('T',' ').replace('Z','');
+            const bjTime = now.toLocaleString('zh-CN', { hour12: false });
             gazeData.push({
               time_local: bjTime,
               x:data.x,
@@ -195,7 +197,7 @@
                 y_real: pos[1]*window.innerHeight,
                 x_pred: pred.x,
                 y_pred: pred.y,
-                time: new Date().toISOString()
+                time: new Date().toLocaleString('zh-CN',{hour12:false})
               });
             }
             if(t>=3000){
@@ -236,22 +238,19 @@
     // ===== 导出 CSV =====
     document.getElementById('exportBtn').onclick = ()=>{
       let csvContent = "data:text/csv;charset=utf-8,";
-      // 注视轨迹
-      csvContent+="time_local(北京时间),x,y\n";
+      csvContent+="time_local(Time),x,y\n";
       csvContent+=gazeData.map(d=>`${d.time_local},${d.x.toFixed(2)},${d.y.toFixed(2)}`).join("\n");
       csvContent+="\n\n";
 
-      // 校准误差
-      csvContent+="点编号,误差(px)\n";
+      csvContent+="Point,Error(px)\n";
       calibrationErrors.forEach((err,i)=>csvContent+=`${i+1},${err.toFixed(2)}\n`);
       const avgCal = (calibrationErrors.reduce((a,b)=>a+b,0)/calibrationErrors.length).toFixed(2);
-      csvContent+=`平均校准误差,${avgCal}\n\n`;
+      csvContent+=`AverageError,${avgCal}\n\n`;
 
-      // 验证误差
-      csvContent+="验证点编号,误差(px)\n";
+      csvContent+="Point_Validation,Error(px)\n";
       validationErrors.forEach((err,i)=>csvContent+=`${i+1},${err.toFixed(2)}\n`);
       const avgVal = (validationErrors.reduce((a,b)=>a+b,0)/validationErrors.length).toFixed(2);
-      csvContent+=`平均验证误差,${avgVal}\n`;
+      csvContent+=`AverageError_Validation,${avgVal}\n`;
 
       const link = document.createElement("a");
       link.setAttribute("href", encodeURI(csvContent));
